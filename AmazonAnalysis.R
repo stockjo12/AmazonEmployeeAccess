@@ -10,7 +10,8 @@ library(beepr)
 
 #Bringing in Data
 train <- vroom("train.csv") |>
-  clean_names()
+  clean_names() |>
+  mutate(action = as.factor(action))
 test <- vroom("test.csv") |>
   clean_names()
 
@@ -56,9 +57,35 @@ target <- "action"
 ev <- c("role_title", "role_rollup_2", "role_rollup_1", "role_family_desc", 
         "role_family", "role_deptname", "role_code", "resource", "mgr_id")
 amazon_recipe <- recipe(action ~ ., data = train) |>
-  step_mutate_at(ev, fn = factor) |>
+  step_mutate_at(all_of(ev), fn = factor) |>
   step_other(all_of(ev), threshold = 0.001) |>
-  step_dummy(role_family, role_rollup_1, role_rollup_2, role_title, role_code, 
-             role_deptname, role_family_desc, mgr_id, resource)
+  step_dummy(all_of(ev))
 prep <- prep(amazon_recipe)
 baked <- bake(prep, new_data = test)
+
+### WORK FLOWS ###
+# (1) Defining Logistic Regression Model
+logRegModel <- logistic_reg() |>
+  set_engine("glm") 
+
+#Making Workflow
+log_workflow <- workflow() |>
+  add_recipe(amazon_recipe) |>
+  add_model(logRegModel) |>
+  fit(data = train)
+beepr::beep()
+
+#Making Predictions
+amazon_predictions <- predict(log_workflow,
+                              new_data=test,
+                              type = "prob")
+beepr::beep()
+
+#Formatting Predictions for Kaggle
+kaggle_log <- amazon_predictions |>
+  bind_cols(test) |>
+  select(id, .pred_0) |>
+  rename(action = .pred_0)
+
+#Saving CSV File
+vroom_write(x=kaggle_log, file="./Logistic.csv", delim=",")
