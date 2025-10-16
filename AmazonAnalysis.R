@@ -22,7 +22,7 @@ ev <- c("role_title", "role_rollup_2", "role_rollup_1", "role_family_desc",
         "role_family", "role_deptname", "role_code", "resource", "mgr_id")
 amazon_recipe <- recipe(action ~ ., data = train) |>
   step_mutate_at(any_of(ev), fn = factor) |>
-  step_other(any_of(ev), threshold = 0.1) |> #0.1 for Testing; 0.001 for Results
+  step_other(any_of(ev), threshold = 0.001) |> #0.1 for Testing; 0.001 for Results
   step_lencode_glm(any_of(ev), outcome = target) |>
   step_normalize(all_numeric_predictors())
 prep <- prep(amazon_recipe)
@@ -55,7 +55,7 @@ kaggle_log <- amazon_predictions |>
   rename(action = .pred_1)
 
 #Saving CSV File
-vroom_write(x=kaggle_log, file="./Logistic.csv", delim=",")
+vroom_write(x=kaggle_log, file="./Logistic_BATCH.csv", delim=",")
 
 # (2) Penalized Logistic Regression
 #Defining Model
@@ -70,12 +70,12 @@ plog_workflow <- workflow() |>
 #Defining Grid of Values
 tuning_grid <- grid_regular(penalty(), 
                             mixture(), 
-                            levels = 3) #3 for Testing; 5 for Results
+                            levels = 5) #3 for Testing; 5 for Results
 
 #Splitting Data
 folds <- vfold_cv(train, 
                   v = 5,
-                  repeats = 1) #1 for Testing; 3 for Results
+                  repeats = 3) #1 for Testing; 3 for Results
 
 #Run Cross Validation
 CV_results <- plog_workflow |>
@@ -102,7 +102,7 @@ kaggle_plog <- plog_pred |>
   rename(action = .pred_1)
 
 #Saving CSV File
-vroom_write(x=kaggle_plog, file="./Penalized2.csv", delim=",")
+vroom_write(x=kaggle_plog, file="./Penalized_BATCH.csv", delim=",")
 
 ### EDA ### 
 #Wrangling Data for EDA

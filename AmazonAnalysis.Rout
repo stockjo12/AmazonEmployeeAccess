@@ -1,0 +1,251 @@
+
+R version 4.5.1 (2025-06-13) -- "Great Square Root"
+Copyright (C) 2025 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> ### SET UP ###
+> #Downloading Libraries
+> library(tidyverse)
+── Attaching core tidyverse packages ──────────────────────── tidyverse 2.0.0 ──
+✔ dplyr     1.1.4     ✔ readr     2.1.5
+✔ forcats   1.0.0     ✔ stringr   1.5.1
+✔ ggplot2   3.5.2     ✔ tibble    3.3.0
+✔ lubridate 1.9.4     ✔ tidyr     1.3.1
+✔ purrr     1.1.0     
+── Conflicts ────────────────────────────────────────── tidyverse_conflicts() ──
+✖ dplyr::filter() masks stats::filter()
+✖ dplyr::lag()    masks stats::lag()
+ℹ Use the conflicted package (<http://conflicted.r-lib.org/>) to force all conflicts to become errors
+> library(tidymodels)
+── Attaching packages ────────────────────────────────────── tidymodels 1.4.1 ──
+✔ broom        1.0.10     ✔ rsample      1.3.1 
+✔ dials        1.4.2      ✔ tailor       0.1.0 
+✔ infer        1.0.9      ✔ tune         2.0.0 
+✔ modeldata    1.5.1      ✔ workflows    1.3.0 
+✔ parsnip      1.3.3      ✔ workflowsets 1.1.1 
+✔ recipes      1.3.1      ✔ yardstick    1.3.2 
+── Conflicts ───────────────────────────────────────── tidymodels_conflicts() ──
+✖ scales::discard() masks purrr::discard()
+✖ dplyr::filter()   masks stats::filter()
+✖ recipes::fixed()  masks stringr::fixed()
+✖ dplyr::lag()      masks stats::lag()
+✖ yardstick::spec() masks readr::spec()
+✖ recipes::step()   masks stats::step()
+> library(vroom)
+
+Attaching package: ‘vroom’
+
+The following object is masked from ‘package:yardstick’:
+
+    spec
+
+The following object is masked from ‘package:scales’:
+
+    col_factor
+
+The following objects are masked from ‘package:readr’:
+
+    as.col_spec, col_character, col_date, col_datetime, col_double,
+    col_factor, col_guess, col_integer, col_logical, col_number,
+    col_skip, col_time, cols, cols_condense, cols_only, date_names,
+    date_names_lang, date_names_langs, default_locale, fwf_cols,
+    fwf_empty, fwf_positions, fwf_widths, locale, output_column,
+    problems, spec
+
+> library(patchwork)
+> library(janitor)
+
+Attaching package: ‘janitor’
+
+The following objects are masked from ‘package:stats’:
+
+    chisq.test, fisher.test
+
+> library(embed)
+> library(beepr)
+> 
+> #Bringing in Data
+> train <- vroom("train.csv") |> 
++   clean_names() |>
++   mutate(action = as.factor(action))
+Rows: 32769 Columns: 10
+── Column specification ────────────────────────────────────────────────────────
+Delimiter: ","
+dbl (10): ACTION, RESOURCE, MGR_ID, ROLE_ROLLUP_1, ROLE_ROLLUP_2, ROLE_DEPTN...
+
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+> test <- vroom("test.csv") |>
++   clean_names()
+Rows: 58921 Columns: 10
+── Column specification ────────────────────────────────────────────────────────
+Delimiter: ","
+dbl (10): id, RESOURCE, MGR_ID, ROLE_ROLLUP_1, ROLE_ROLLUP_2, ROLE_DEPTNAME,...
+
+ℹ Use `spec()` to retrieve the full column specification for this data.
+ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+> 
+> ### FEATURE ENGINEERING ###
+> #Making Recipe
+> target <- "action" 
+> ev <- c("role_title", "role_rollup_2", "role_rollup_1", "role_family_desc", 
++         "role_family", "role_deptname", "role_code", "resource", "mgr_id")
+> amazon_recipe <- recipe(action ~ ., data = train) |>
++   step_mutate_at(any_of(ev), fn = factor) |>
++   step_other(any_of(ev), threshold = 0.001) |> #0.1 for Testing; 0.001 for Results
++   step_lencode_glm(any_of(ev), outcome = target) |>
++   step_normalize(all_numeric_predictors())
+> prep <- prep(amazon_recipe)
+> beepr::beep()
+Warning message:
+In value[[3L]](cond) :
+  beep() could not play the sound due to the following error:
+Error in play.default(x, rate, ...): no audio drivers are available
+
+> baked <- bake(prep, new_data = test)
+> 
+> ### WORK FLOWS ###
+> # (1) Logistic Regression
+> #Defining Model
+> logRegModel <- logistic_reg() |>
++   set_engine("glm") 
+> 
+> #Making Workflow
+> log_workflow <- workflow() |>
++   add_recipe(amazon_recipe) |>
++   add_model(logRegModel) |>
++   fit(data = train)
+Warning message:
+glm.fit: fitted probabilities numerically 0 or 1 occurred 
+> beepr::beep()
+Warning message:
+In value[[3L]](cond) :
+  beep() could not play the sound due to the following error:
+Error in play.default(x, rate, ...): no audio drivers are available
+
+> 
+> #Making Predictions
+> amazon_predictions <- predict(log_workflow,
++                               new_data=test,
++                               type = "prob")
+> beepr::beep()
+Warning message:
+In value[[3L]](cond) :
+  beep() could not play the sound due to the following error:
+Error in play.default(x, rate, ...): no audio drivers are available
+
+> 
+> #Formatting Predictions for Kaggle
+> kaggle_log <- amazon_predictions |>
++   bind_cols(test) |>
++   select(id, .pred_1) |>
++   rename(action = .pred_1)
+> 
+> #Saving CSV File
+> vroom_write(x=kaggle_log, file="./Logistic_BATCH.csv", delim=",")
+> 
+> # (2) Penalized Logistic Regression
+> #Defining Model
+> amazon_plog <- logistic_reg(mixture = tune(), penalty = tune()) |>
++   set_engine("glmnet")
+> 
+> #Making Workflow
+> plog_workflow <- workflow() |>
++   add_recipe(amazon_recipe) |>
++   add_model(amazon_plog)
+> 
+> #Defining Grid of Values
+> tuning_grid <- grid_regular(penalty(), 
++                             mixture(), 
++                             levels = 5) #3 for Testing; 5 for Results
+> 
+> #Splitting Data
+> folds <- vfold_cv(train, 
++                   v = 5,
++                   repeats = 3) #1 for Testing; 3 for Results
+> 
+> #Run Cross Validation
+> CV_results <- plog_workflow |>
++   tune_grid(resamples = folds, grid = tuning_grid, 
++             metrics = metric_set(roc_auc)) 
+> beepr::beep()
+Warning message:
+In value[[3L]](cond) :
+  beep() could not play the sound due to the following error:
+Error in play.default(x, rate, ...): no audio drivers are available
+
+> 
+> #Find Best Tuning Parameters
+> bestTune <- CV_results |>
++   select_best(metric = "roc_auc")
+> 
+> #Finalize Workflow
+> final_wf <- plog_workflow |>
++   finalize_workflow(bestTune) |>
++   fit(data = train)
+> 
+> #Making Predictions
+> plog_pred <- predict(final_wf, new_data = test, type = "prob")
+> 
+> #Formatting Predictions for Kaggle
+> kaggle_plog <- plog_pred |>
++   bind_cols(test) |>
++   select(id, .pred_1) |>
++   rename(action = .pred_1)
+> 
+> #Saving CSV File
+> vroom_write(x=kaggle_plog, file="./Penalized_BATCH.csv", delim=",")
+> 
+> ### EDA ### 
+> #Wrangling Data for EDA
+> train_long <- train |>
++   pivot_longer(
++     cols = c("resource", "mgr_id", "role_rollup_1", "role_rollup_2", "role_code",
++              "role_deptname", "role_title", "role_family_desc","role_family"),
++     names_to = "variable",
++     values_to = "value"
++   )
+> 
+> #Boxplot of Explanatory Variables
+> plot1 <- ggplot(data = train_long, aes(x = value, y = variable, 
++                                        fill = variable)) +
++   geom_boxplot() +
++   scale_fill_brewer() + 
++   labs(
++     x = "",
++     y = "",
++     title = "Distribution of EV"
++   )
+> plot1
+> 
+> #Bar Chart of Action
+> plot2 <- ggplot(train, aes(x = factor(action))) +  
++   geom_bar(fill = "dodgerblue") +
++   coord_flip() +
++   labs(
++     x = "Action",
++     y = "Count",
++     title = "Distribution of Action"
++   ) 
+> plot2
+> 
+> #Putting Plots Together
+> plot1 / plot2
+> 
+> proc.time()
+     user    system   elapsed 
+21548.124   587.361  2922.692 
