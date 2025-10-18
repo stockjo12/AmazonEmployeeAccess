@@ -7,6 +7,7 @@ library(patchwork)
 library(janitor)
 library(embed)
 library(beepr)
+library(ranger)
 
 #Bringing in Data
 train <- vroom("train.csv") |> 
@@ -103,6 +104,57 @@ kaggle_plog <- plog_pred |>
 
 #Saving CSV File
 vroom_write(x=kaggle_plog, file="./Penalized_BATCH.csv", delim=",")
+
+# (3) Random Forests
+#Defining Model
+forest_model <- rand_forest(mtry = tune(),
+                            min_n = tune(),
+                            trees = 1000) |>
+  set_engine("ranger") |>
+  set_mode("classification")
+
+#Creating a Workflow
+forest_wf <- workflow() |>
+  add_recipe(amazon_recipe)|>
+  add_model(forest_model)
+
+#Defining Grid of Values
+maxNumXs <- ncol(baked)
+forest_grid <- grid_regular(mtry(range = c(1, maxNumXs)),
+                            min_n(),
+                            levels = 5) #3 for Testing; 5 for Results
+
+#Splitting Data
+forest_folds <- vfold_cv(train, 
+                         v = 5, 
+                         repeats = 3) #1 for Testing; 3 for Results
+
+#Run Cross Validation
+forest_results <- forest_wf |>
+  tune_grid(resamples = forest_folds,
+            grid = forest_grid,
+            metrics = metric_set(roc_auc))
+
+#Find Best Tuning Parameters
+bestTune <- forest_results |>
+  select_best(metric = "roc_auc")
+
+#Finalizing Workflow
+final_fwf <- forest_wf |>
+  finalize_workflow(bestTune) |>
+  fit(data = train)
+
+#Making Predictions
+forest_pred <- predict(final_fwf, new_data = test, type = "prob")
+
+#Formatting Predictions for Kaggle
+kaggle_forest <- forest_pred |>
+  bind_cols(test) |>
+  select(id, .pred_1) |>
+  rename(action = .pred_1)
+
+#Saving CSV File
+vroom_write(x=kaggle_forest, file="./Forest_BATCH.csv", delim=",")
 
 ### EDA ### 
 #Wrangling Data for EDA
