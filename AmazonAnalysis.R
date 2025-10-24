@@ -10,6 +10,8 @@ library(beepr)
 library(ranger)
 library(kknn) 
 library(doParallel)
+library(discrim)
+library(naivebayes)
 
 #Bringing in Data
 train <- vroom("train.csv") |> 
@@ -38,7 +40,7 @@ baked <- bake(prep, new_data = test)
 # # (1) Logistic Regression
 # #Defining Model
 # logRegModel <- logistic_reg() |>
-#   set_engine("glm") 
+#   set_engine("glm")
 # 
 # #Making Workflow
 # log_workflow <- workflow() |>
@@ -71,19 +73,19 @@ baked <- bake(prep, new_data = test)
 #   add_model(amazon_plog)
 # 
 # #Defining Grid of Values
-# tuning_grid <- grid_regular(penalty(), 
-#                             mixture(), 
+# tuning_grid <- grid_regular(penalty(),
+#                             mixture(),
 #                             levels = 5) #3 for Testing; 5 for Results
 # 
 # #Splitting Data
-# folds <- vfold_cv(train, 
+# folds <- vfold_cv(train,
 #                   v = 5,
 #                   repeats = 3) #1 for Testing; 3 for Results
 # 
 # #Run Cross Validation
 # CV_results <- plog_workflow |>
-#   tune_grid(resamples = folds, grid = tuning_grid, 
-#             metrics = metric_set(roc_auc)) 
+#   tune_grid(resamples = folds, grid = tuning_grid,
+#             metrics = metric_set(roc_auc))
 # 
 # #Find Best Tuning Parameters
 # bestTune <- CV_results |>
@@ -126,8 +128,8 @@ baked <- bake(prep, new_data = test)
 #                             levels = 5) #3 for Testing; 5 for Results
 # 
 # #Splitting Data
-# forest_folds <- vfold_cv(train, 
-#                          v = 5, 
+# forest_folds <- vfold_cv(train,
+#                          v = 5,
 #                          repeats = 3) #1 for Testing; 3 for Results
 # 
 # #Run Cross Validation
@@ -156,53 +158,101 @@ baked <- bake(prep, new_data = test)
 # 
 # #Saving CSV File
 # vroom_write(x=kaggle_forest, file="./Forest_BATCH.csv", delim=",")
+# 
+# # (4) K-Nearest Neighbors
+# #Defining Model
+# knn_model <- nearest_neighbor(neighbors = tune()) |>
+#   set_engine("kknn") |>
+#   set_mode("classification")
+# 
+# #Creating a Workflow
+# knn_wf <- workflow() |>
+#   add_recipe(amazon_recipe)|>
+#   add_model(knn_model)
+# 
+# #Defining Grid of Values
+# knn_grid <- grid_regular(neighbors(range = c(1, 250)),
+#                             levels = 25) #More Levels = More Time
+# 
+# #Splitting Data
+# knn_folds <- vfold_cv(train, 
+#                          v = 5, 
+#                          repeats = 3) #1 for Testing; 3 for Results
+# 
+# #Run Cross Validation
+# knn_results <- knn_wf |>
+#   tune_grid(resamples = knn_folds,
+#             grid = knn_grid,
+#             metrics = metric_set(roc_auc))
+# 
+# #Find Best Tuning Parameters
+# knn_best <- knn_results |>
+#   select_best(metric = "roc_auc")
+# 
+# #Finalizing Workflow
+# final_kwf <- knn_wf |>
+#   finalize_workflow(knn_best) |>
+#   fit(data = train)
+# 
+# #Making Predictions
+# knn_pred <- predict(final_kwf, new_data = test, type = "prob")
+# 
+# #Formatting Predictions for Kaggle
+# kaggle_knn <- knn_pred |>
+#   bind_cols(test) |>
+#   select(id, .pred_1) |>
+#   rename(action = .pred_1)
+# 
+# #Saving CSV File
+# vroom_write(x=kaggle_knn, file="./KNN.csv", delim=",")
 
-# (4) K-Nearest Neighbors
+# (5) Naive Bayes
 #Defining Model
-knn_model <- nearest_neighbor(neighbors = tune()) |>
-  set_engine("kknn") |>
+bayes_model <- naive_Bayes(Laplace = tune(), smoothness = tune()) |>
+  set_engine("naivebayes") |>
   set_mode("classification")
 
 #Creating a Workflow
-knn_wf <- workflow() |>
+bayes_wf <- workflow() |>
   add_recipe(amazon_recipe)|>
-  add_model(knn_model)
+  add_model(bayes_model)
 
 #Defining Grid of Values
-knn_grid <- grid_regular(neighbors(range = c(1, 250)),
-                            levels = 25) #More Levels = More Time
+bayes_grid <- grid_regular(Laplace(range = c(0, 2)), 
+                           smoothness(range = c(0.01, 1)),
+                           levels = 5) #3 for Testing; 5 for Results
 
 #Splitting Data
-knn_folds <- vfold_cv(train, 
-                         v = 5, 
-                         repeats = 3) #1 for Testing; 3 for Results
+bayes_folds <- vfold_cv(train, 
+                      v = 5, 
+                      repeats = 3) #1 for Testing; 3 for Results
 
 #Run Cross Validation
-knn_results <- knn_wf |>
-  tune_grid(resamples = knn_folds,
-            grid = knn_grid,
+bayes_results <- bayes_wf |>
+  tune_grid(resamples = bayes_folds,
+            grid = bayes_grid,
             metrics = metric_set(roc_auc))
 
 #Find Best Tuning Parameters
-knn_best <- knn_results |>
+bayes_best <- bayes_results |>
   select_best(metric = "roc_auc")
 
 #Finalizing Workflow
-final_kwf <- knn_wf |>
-  finalize_workflow(knn_best) |>
+final_bwf <- bayes_wf |>
+  finalize_workflow(bayes_best) |>
   fit(data = train)
 
 #Making Predictions
-knn_pred <- predict(final_kwf, new_data = test, type = "prob")
+bayes_pred <- predict(final_bwf, new_data = test, type = "prob")
 
 #Formatting Predictions for Kaggle
-kaggle_knn <- knn_pred |>
+kaggle_bayes <- bayes_pred |>
   bind_cols(test) |>
   select(id, .pred_1) |>
   rename(action = .pred_1)
 
 #Saving CSV File
-vroom_write(x=kaggle_knn, file="./KNN.csv", delim=",")
+vroom_write(x = kaggle_bayes, file="./Bayes.csv", delim=",")
 
 ### EDA ### 
 #Wrangling Data for EDA
