@@ -12,6 +12,7 @@ library(kknn)
 library(doParallel)
 library(discrim)
 library(naivebayes)
+library(keras)
 
 #Bringing in Data
 train <- vroom("train.csv") |> 
@@ -23,19 +24,19 @@ test <- vroom("test.csv") |>
 #Setting Up Parallel Computing
 registerDoParallel(cores = 5)
 
-### FEATURE ENGINEERING ###
-#Making Recipe
-target <- "action" 
-ev <- c("role_title", "role_rollup_2", "role_rollup_1", "role_family_desc", 
-        "role_family", "role_deptname", "role_code", "resource", "mgr_id")
-amazon_recipe <- recipe(action ~ ., data = train) |>
-  step_mutate_at(any_of(ev), fn = factor) |>
-  step_other(any_of(ev), threshold = 0.001) |> #0.1 for Testing; 0.001 for Results
-  step_lencode_glm(any_of(ev), outcome = target) |>
-  step_normalize(all_numeric_predictors())
-prep <- prep(amazon_recipe)
-baked <- bake(prep, new_data = test)
-
+# ### FEATURE ENGINEERING ###
+# #Making Recipe
+# target <- "action" 
+# ev <- c("role_title", "role_rollup_2", "role_rollup_1", "role_family_desc", 
+#         "role_family", "role_deptname", "role_code", "resource", "mgr_id")
+# amazon_recipe <- recipe(action ~ ., data = train) |>
+#   step_mutate_at(any_of(ev), fn = factor) |>
+#   step_other(any_of(ev), threshold = 0.001) |> #0.1 for Testing; 0.001 for Results
+#   step_lencode_glm(any_of(ev), outcome = target) |>
+#   step_normalize(all_numeric_predictors())
+# prep <- prep(amazon_recipe)
+# baked <- bake(prep, new_data = test)
+# 
 # ### WORK FLOWS ###
 # # (1) Logistic Regression
 # #Defining Model
@@ -175,8 +176,8 @@ baked <- bake(prep, new_data = test)
 #                             levels = 25) #More Levels = More Time
 # 
 # #Splitting Data
-# knn_folds <- vfold_cv(train, 
-#                          v = 5, 
+# knn_folds <- vfold_cv(train,
+#                          v = 5,
 #                          repeats = 3) #1 for Testing; 3 for Results
 # 
 # #Run Cross Validation
@@ -205,54 +206,122 @@ baked <- bake(prep, new_data = test)
 # 
 # #Saving CSV File
 # vroom_write(x=kaggle_knn, file="./KNN.csv", delim=",")
+# 
+# # (5) Naive Bayes
+# #Defining Model
+# bayes_model <- naive_Bayes(Laplace = tune(), smoothness = tune()) |>
+#   set_engine("naivebayes") |>
+#   set_mode("classification")
+# 
+# #Creating a Workflow
+# bayes_wf <- workflow() |>
+#   add_recipe(amazon_recipe)|>
+#   add_model(bayes_model)
+# 
+# #Defining Grid of Values
+# bayes_grid <- grid_regular(Laplace(range = c(0, 2)), 
+#                            smoothness(range = c(0.01, 1)),
+#                            levels = 5) #3 for Testing; 5 for Results
+# 
+# #Splitting Data
+# bayes_folds <- vfold_cv(train, 
+#                       v = 5, 
+#                       repeats = 3) #1 for Testing; 3 for Results
+# 
+# #Run Cross Validation
+# bayes_results <- bayes_wf |>
+#   tune_grid(resamples = bayes_folds,
+#             grid = bayes_grid,
+#             metrics = metric_set(roc_auc))
+# 
+# #Find Best Tuning Parameters
+# bayes_best <- bayes_results |>
+#   select_best(metric = "roc_auc")
+# 
+# #Finalizing Workflow
+# final_bwf <- bayes_wf |>
+#   finalize_workflow(bayes_best) |>
+#   fit(data = train)
+# 
+# #Making Predictions
+# bayes_pred <- predict(final_bwf, new_data = test, type = "prob")
+# 
+# #Formatting Predictions for Kaggle
+# kaggle_bayes <- bayes_pred |>
+#   bind_cols(test) |>
+#   select(id, .pred_1) |>
+#   rename(action = .pred_1)
+# 
+# #Saving CSV File
+# vroom_write(x = kaggle_bayes, file="./Bayes.csv", delim=",")
 
-# (5) Naive Bayes
+# (6) Neural Networks
+#Making Recipe
+target <- "action" 
+ev <- c("role_title", "role_rollup_2", "role_rollup_1", "role_family_desc", 
+        "role_family", "role_deptname", "role_code", "resource", "mgr_id")
+nn_recipe <- recipe(formula = action ~ ., data = train) |>
+  step_mutate_at(any_of(ev), fn = factor) |>
+  step_other(any_of(ev), threshold = 0.1) |> #0.1 for Testing; 0.001 for Results
+  step_lencode_glm(any_of(ev), outcome = target) |>
+  step_normalize(all_numeric_predictors()) 
+
 #Defining Model
-bayes_model <- naive_Bayes(Laplace = tune(), smoothness = tune()) |>
-  set_engine("naivebayes") |>
+nn_model <- mlp(hidden_units = tune(),
+                epochs = 50) |> #50 Low, 100 Medium, 250 High
+  set_engine("keras") |>
   set_mode("classification")
 
 #Creating a Workflow
-bayes_wf <- workflow() |>
-  add_recipe(amazon_recipe)|>
-  add_model(bayes_model)
+nn_wf <- workflow() |>
+  add_recipe(nn_recipe)|>
+  add_model(nn_model)
 
 #Defining Grid of Values
-bayes_grid <- grid_regular(Laplace(range = c(0, 2)), 
-                           smoothness(range = c(0.01, 1)),
-                           levels = 5) #3 for Testing; 5 for Results
+nn_grid <- grid_regular(hidden_units(range = c(1, 20)),
+                           levels = 3) #3 for Testing; 5 for Results
 
 #Splitting Data
-bayes_folds <- vfold_cv(train, 
-                      v = 5, 
-                      repeats = 3) #1 for Testing; 3 for Results
+nn_folds <- vfold_cv(train,
+                      v = 5,
+                      repeats = 1) #1 for Testing; 3 for Results
 
 #Run Cross Validation
-bayes_results <- bayes_wf |>
-  tune_grid(resamples = bayes_folds,
-            grid = bayes_grid,
+nn_results <- nn_wf |>
+  tune_grid(resamples = nn_folds,
+            grid = nn_grid,
             metrics = metric_set(roc_auc))
 
 #Find Best Tuning Parameters
-bayes_best <- bayes_results |>
+nn_best <- nn_results |>
   select_best(metric = "roc_auc")
 
 #Finalizing Workflow
-final_bwf <- bayes_wf |>
-  finalize_workflow(bayes_best) |>
+final_nwf <- nn_wf |>
+  finalize_workflow(nn_best) |>
   fit(data = train)
 
 #Making Predictions
-bayes_pred <- predict(final_bwf, new_data = test, type = "prob")
+nn_pred <- predict(final_nwf, new_data = test, type = "prob")
 
 #Formatting Predictions for Kaggle
-kaggle_bayes <- bayes_pred |>
+kaggle_nn <- nn_pred |>
   bind_cols(test) |>
   select(id, .pred_1) |>
   rename(action = .pred_1)
 
 #Saving CSV File
-vroom_write(x = kaggle_bayes, file="./Bayes.csv", delim=",")
+vroom_write(x = kaggle_nn, file="./NN_BATCH.csv", delim=",")
+
+#Making Plot
+nn_results |> collect_metrics() |>
+  filter(.metric == "roc_auc") |>
+  ggplot(aes(x = hidden_units, y = mean)) +
+  geom_line() + 
+  geom_point() +
+  labs(title = "ROC AUC Vs Hidden Units",
+       x = "Hidden Units",
+       y = "Mean ROC AUC")
 
 ### EDA ### 
 #Wrangling Data for EDA
