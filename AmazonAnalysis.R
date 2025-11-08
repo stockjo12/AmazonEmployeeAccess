@@ -3,18 +3,19 @@
 library(tidyverse)
 library(tidymodels)
 library(vroom)
-library(patchwork)
 library(janitor)
-library(embed)
-library(beepr)
 library(ranger)
-library(kknn) 
 library(doParallel)
-library(discrim)
-library(naivebayes)
-library(keras)
-library(kernlab)
+library(embed)
 library(themis)
+# library(beepr)
+# library(rstanarm)
+# library(patchwork)
+# library(kknn)
+# library(discrim)
+# library(naivebayes)
+# library(keras)
+# library(kernlab)
 
 #Bringing in Data
 train <- vroom("train.csv") |> 
@@ -26,19 +27,17 @@ test <- vroom("test.csv") |>
 #Setting Up Parallel Computing
 registerDoParallel(cores = 5)
 
-### FEATURE ENGINEERING ###
-# #Making Original Recipe
-# target <- "action"
-# ev <- c("role_title", "role_rollup_2", "role_rollup_1", "role_family_desc",
-#         "role_family", "role_deptname", "role_code", "resource", "mgr_id")
-# amazon_recipe <- recipe(action ~ ., data = train) |>
-#   step_mutate_at(any_of(ev), fn = factor) |>
-#   step_other(any_of(ev), threshold = 0.001) |> #0.1 for Testing; 0.001 for Results
-#   step_lencode_glm(any_of(ev), outcome = target) |>
-#   step_normalize(all_numeric_predictors())
-# prep <- prep(amazon_recipe)
-# baked <- bake(prep, new_data = test)
-# 
+# ### FEATURE ENGINEERING ###
+#Making Original Recipe
+target <- "action"
+ev <- c("role_title", "role_rollup_2", "role_rollup_1", "role_family_desc",
+        "role_family", "role_deptname", "role_code", "resource", "mgr_id")
+amazon_recipe <- recipe(action ~ ., data = train) |>
+  step_mutate_at(any_of(ev), fn = factor) |>
+  step_other(any_of(ev), threshold = 0.001) |> #0.1 for Testing; 0.001 for Results
+  step_lencode_glm(any_of(ev), outcome = target) |>
+  step_nzv(all_predictors())
+
 # # (1) Making Principal Component Reduction Recipe
 # target <- "action"
 # ev <- c("role_title", "role_rollup_2", "role_rollup_1", "role_family_desc",
@@ -51,20 +50,31 @@ registerDoParallel(cores = 5)
 #   step_pca(all_predictors(), threshold = 0.95)
 # prep <- prep(pcr_recipe)
 # baked <- bake(prep, new_data = test)
+# 
+# # (2) Making SMOTE Recipe
+# target <- "action"
+# ev <- c("role_title", "role_rollup_2", "role_rollup_1", "role_family_desc",
+#         "role_family", "role_deptname", "role_code", "resource", "mgr_id")
+# smote_recipe <- recipe(formula = action ~ ., data = train) |>
+#   step_mutate_at(any_of(ev), fn = factor) |>
+#   step_other(any_of(ev), threshold = 0.001) |> #0.1 for Testing; 0.001 for Results
+#   step_lencode_glm(any_of(ev), outcome = target) |>
+#   step_normalize(all_numeric_predictors()) |>
+#   step_smote(action)
+# prep <- prep(smote_recipe)
+# baked <- bake(prep, new_data = test)
 
-# (2) Making SMOTE Recipe
-target <- "action"
-ev <- c("role_title", "role_rollup_2", "role_rollup_1", "role_family_desc",
-        "role_family", "role_deptname", "role_code", "resource", "mgr_id")
-smote_recipe <- recipe(formula = action ~ ., data = train) |>
-  step_mutate_at(any_of(ev), fn = factor) |>
-  step_other(any_of(ev), threshold = 0.001) |> #0.1 for Testing; 0.001 for Results
-  step_lencode_glm(any_of(ev), outcome = target) |>
-  step_normalize(all_numeric_predictors()) |>
-  step_smote(action)
-prep <- prep(smote_recipe)
-baked <- bake(prep, new_data = test)
-
+# (3) Making a New Recipe
+# target <- "action"
+# ev <- c("role_title", "role_rollup_2", "role_rollup_1", "role_family_desc",
+#         "role_family", "role_deptname", "role_code", "resource", "mgr_id")
+# new_recipe <- recipe(action ~ ., data = train) |>
+#   step_mutate_at(any_of(ev), fn = factor) |>
+#   step_other(any_of(ev), threshold = 0.001) |> #0.1 for Testing; 0.001 for Results
+#   step_lencode_bayes(any_of(ev), outcome = target)
+# prep <- prep(new_recipe)
+# baked <- bake(prep, new_data = test)
+# 
 ### WORK FLOWS ###
 # # (1) Logistic Regression
 # #Defining Model
@@ -141,25 +151,25 @@ baked <- bake(prep, new_data = test)
 #Defining Model
 forest_model <- rand_forest(mtry = tune(),
                             min_n = tune(),
-                            trees = 1000) |> #50 for Testing; 1000 for Results
+                            trees = 500) |> #50 for Testing; 1000 for Results
   set_engine("ranger") |>
   set_mode("classification")
 
 #Creating a Workflow
 forest_wf <- workflow() |>
-  add_recipe(smote_recipe)|>
+  add_recipe(amazon_recipe)|>
   add_model(forest_model)
 
 #Defining Grid of Values
-maxNumXs <- ncol(baked)
-forest_grid <- grid_regular(mtry(range = c(1, maxNumXs)),
+max <- ncol(baked)
+forest_grid <- grid_regular(mtry(range = c(1, 10)),
                             min_n(),
-                            levels = 5) #3 for Testing; 5 for Results
+                            levels = 3) #3 for Testing; 5 for Results
 
 #Splitting Data
 forest_folds <- vfold_cv(train,
-                         v = 5,
-                         repeats = 3) #1 for Testing; 3 for Results
+                         v = 10,
+                         repeats = 1) #1 for Testing; 3 for Results
 
 #Run Cross Validation
 forest_results <- forest_wf |>
@@ -171,7 +181,7 @@ forest_results <- forest_wf |>
 bestTune <- forest_results |>
   select_best(metric = "roc_auc")
 
-#Finalizing Workflow
+#Finalizing Workflow with Cross Validation
 final_fwf <- forest_wf |>
   finalize_workflow(bestTune) |>
   fit(data = train)
@@ -186,7 +196,41 @@ kaggle_forest <- forest_pred |>
   rename(action = .pred_1)
 
 #Saving CSV File
-vroom_write(x=kaggle_forest, file="./Forest_BATCH.csv", delim=",")
+vroom_write(x=kaggle_forest, file="./RF2.csv", delim=",")
+
+#Saving Results
+saveRDS(final_fwf, "forest_model2.rds")
+
+# #Bringing in Best Results
+# bestTune <- readRDS("forest_model.rds")
+# 
+# # Recreate the workflow
+# forest_wf <- workflow() |>
+#   add_recipe(amazon_recipe) |>
+#   add_model(
+#     rand_forest(
+#       mtry = 3,
+#       min_n = 2,
+#       trees = 2000
+#     ) |> 
+#       set_engine("ranger") |>
+#       set_mode("classification")
+#   )
+# 
+# # Fit on the full training data
+# final_fwf <- fit(forest_wf, data = train)
+# 
+# #Making Predictions
+# forest_pred <- predict(final_fwf, new_data = test, type = "prob")
+# 
+# #Formatting Predictions for Kaggle
+# kaggle_forest <- forest_pred |>
+#   bind_cols(test) |>
+#   select(id, .pred_1) |>
+#   rename(action = .pred_1)
+# 
+# #Saving CSV File
+# vroom_write(x=kaggle_forest, file="./Forest_BATCH2.csv", delim=",")
 
 # # (4) K-Nearest Neighbors
 # #Defining Model
@@ -459,41 +503,41 @@ vroom_write(x=kaggle_forest, file="./Forest_BATCH.csv", delim=",")
 # vroom_write(x = kaggle_svmp, file="./SVMP_BATCH.csv", delim=",")
 # vroom_write(x = kaggle_svmr, file="./SVMR_BATCH.csv", delim=",")
 
-### EDA ### 
-#Wrangling Data for EDA
-train_long <- train |>
-  pivot_longer(
-    cols = c("resource", "mgr_id", "role_rollup_1", "role_rollup_2", "role_code",
-             "role_deptname", "role_title", "role_family_desc","role_family"),
-    names_to = "variable",
-    values_to = "value"
-  )
-
-#Boxplot of Explanatory Variables
-plot1 <- ggplot(data = train_long, aes(x = value, y = variable, 
-                                       fill = variable)) +
-  geom_boxplot() +
-  scale_fill_brewer() + 
-  labs(
-    x = "",
-    y = "",
-    title = "Distribution of EV"
-  )
-plot1
-
-#Bar Chart of Action
-plot2 <- ggplot(train, aes(x = factor(action))) +  
-  geom_bar(fill = "dodgerblue") +
-  coord_flip() +
-  labs(
-    x = "Action",
-    y = "Count",
-    title = "Distribution of Action"
-  ) 
-plot2
-
-#Putting Plots Together
-plot1 / plot2
+# ### EDA ### 
+# #Wrangling Data for EDA
+# train_long <- train |>
+#   pivot_longer(
+#     cols = c("resource", "mgr_id", "role_rollup_1", "role_rollup_2", "role_code",
+#              "role_deptname", "role_title", "role_family_desc","role_family"),
+#     names_to = "variable",
+#     values_to = "value"
+#   )
+# 
+# #Boxplot of Explanatory Variables
+# plot1 <- ggplot(data = train_long, aes(x = value, y = variable, 
+#                                        fill = variable)) +
+#   geom_boxplot() +
+#   scale_fill_brewer() + 
+#   labs(
+#     x = "",
+#     y = "",
+#     title = "Distribution of EV"
+#   )
+# plot1
+# 
+# #Bar Chart of Action
+# plot2 <- ggplot(train, aes(x = factor(action))) +  
+#   geom_bar(fill = "dodgerblue") +
+#   coord_flip() +
+#   labs(
+#     x = "Action",
+#     y = "Count",
+#     title = "Distribution of Action"
+#   ) 
+# plot2
+# 
+# #Putting Plots Together
+# plot1 / plot2
 
 #End Parallel Computing
 registerDoSEQ()
